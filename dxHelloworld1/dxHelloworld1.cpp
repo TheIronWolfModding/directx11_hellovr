@@ -12,10 +12,11 @@
 #include "../openvr/headers/openvr.h"
 #include "rendertextureclass.h"
 #include "debugwindowclass.h"
+#include <sstream>
 
 #pragma comment (lib, "d3d11.lib")
 #pragma comment (lib, "openvr_api.lib")
-
+bool once = false;
 #define MAX_LOADSTRING 100
 //#define VR_DISABLED
 
@@ -47,7 +48,10 @@ D3D11_VIEWPORT			viewport;
 CameraClass* m_CameraLeft = nullptr,
 			*m_CameraRight = nullptr;
 ModelClass* m_Model = nullptr;
+ModelClass* m_hamLeftModel = nullptr;
+ModelClass* m_hamRightModel = nullptr;
 ColorShaderClass* m_ColorShader = nullptr;
+ColorShaderClass* m_hamColorShader = nullptr;
 RenderTextureClass* m_RenderTextureLeft, *m_RenderTextureRight;
 DebugWindowClass* m_DebugWindowLeft, *m_DebugWindowRight;
 
@@ -133,6 +137,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
+		Matrix4 matrixObj(
+			0.984807789f, 0.0f, -0.173648164f, 0.0,
+			0.0f, 1.0f, 0.0f, 0.0,
+			0.173648164, 0.0f, 0.984807789f, 0.0,
+			-0.0299908444f, 0.0f, 0.0f, 1.0f
+		);
+
+		
+		matrixObj.invert();
     // TODO: 在此放置代码。
 
     // 初始化全局字符串
@@ -347,7 +360,7 @@ string MatrixToString(const Matrix4& matrix)
 	return temp;
 }
 
-
+std::fstream outFile;
 Matrix4 GetHMDMatrixPoseEye(vr::Hmd_Eye nEye)
 {
 	if (!m_pHMD)
@@ -361,7 +374,12 @@ Matrix4 GetHMDMatrixPoseEye(vr::Hmd_Eye nEye)
 		matEyeRight.m[0][3], matEyeRight.m[1][3], matEyeRight.m[2][3], 1.0f
 		);
 
-	return matrixObj.invert();
+	outFile << "Eye " << (nEye == vr::Hmd_Eye::Eye_Left ? "Left=" : "Right=" ) << std::endl << MatrixToString(matrixObj).c_str() << std::endl;
+	matrixObj.invert();
+	/*matrixObj[4 * 3 + 0] = -matrixObj[4 * 3 + 0];
+	matrixObj[4 * 3 + 1] = -matrixObj[4 * 3 + 1];
+	matrixObj[4 * 3 + 2] = -matrixObj[4 * 3 + 2];*/
+	return matrixObj;
 }
 
 Matrix4 GetHMDMatrixProjectionEye(vr::Hmd_Eye nEye)
@@ -379,12 +397,19 @@ Matrix4 GetHMDMatrixProjectionEye(vr::Hmd_Eye nEye)
 		);
 }
 
+
+
 void SetupCameras()
 {
+	outFile.open("test_output2", ios::out | ios::trunc);
 	m_mat4ProjectionLeft = GetHMDMatrixProjectionEye(vr::Eye_Left);
 	m_mat4ProjectionRight = GetHMDMatrixProjectionEye(vr::Eye_Right);
 	m_mat4eyePosLeft = GetHMDMatrixPoseEye(vr::Eye_Left);
 	m_mat4eyePosRight = GetHMDMatrixPoseEye(vr::Eye_Right);
+	outFile << "Proj Left=" << std::endl << MatrixToString(m_mat4ProjectionLeft).c_str() << std::endl;
+	outFile << "Proj Right=" << std::endl << MatrixToString(m_mat4ProjectionRight).c_str() << std::endl;
+	outFile << "Eye Left Inverted=" << std::endl << MatrixToString(m_mat4eyePosLeft).c_str() << std::endl;
+	outFile << "Eye Right Inverted=" << std::endl << MatrixToString(m_mat4eyePosRight).c_str() << std::endl;
 
 	//dprintf("left = %s\n, right = %s\n", MatrixToString(m_mat4ProjectionLeft).c_str(),
 	//	MatrixToString(m_mat4ProjectionRight).c_str());
@@ -394,6 +419,12 @@ void SetupCameras()
 Matrix4 GetCurrentViewProjectionMatrix(vr::Hmd_Eye nEye)
 {
 	Matrix4 matMVP;
+	if (!once) {
+
+		outFile << "Pose=" << std::endl << MatrixToString(m_mat4HMDPose).c_str() << std::endl; 
+		once = true;
+		outFile.close();
+	}
 	if (nEye == vr::Eye_Left)
 	{
 		matMVP = m_mat4ProjectionLeft * m_mat4eyePosLeft * m_mat4HMDPose;
@@ -480,8 +511,7 @@ bool init(HWND hWnd)
 
 	m_pHMD = vr::VR_Init(&eError, vr::VRApplication_Scene);
 
-	if (eError != vr::VRInitError_None)
-	{
+	if (eError != vr::VRInitError_None) {
 		m_pHMD = NULL;
 		char buf[1024];
 		sprintf_s(buf, ARRAYSIZE(buf), "Unable to init VR runtime: %s", vr::VR_GetVRInitErrorAsEnglishDescription(eError));
@@ -502,8 +532,7 @@ bool init(HWND hWnd)
 	//clientHeight = m_nRenderHeight;
 
 	m_pRenderModels = (vr::IVRRenderModels *)vr::VR_GetGenericInterface(vr::IVRRenderModels_Version, &eError);
-	if (!m_pRenderModels)
-	{
+	if (!m_pRenderModels) {
 		m_pHMD = NULL;
 		vr::VR_Shutdown();
 
@@ -515,8 +544,7 @@ bool init(HWND hWnd)
 		return false;
 	}
 
-	if (!vr::VRCompositor())
-	{
+	if (!vr::VRCompositor()) {
 		dprintf("Compositor initialization failed. See log file for details\n");
 		return false;
 	}
@@ -556,26 +584,23 @@ bool init(HWND hWnd)
 	swapDesc.SampleDesc.Count = 1; // multisampling, which antialiasing for geometry. Turn it off
 	swapDesc.SampleDesc.Quality = 0;
 	swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH; // alt-enter fullscreen
-	
+
 	swapDesc.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
 	swapDesc.BufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
 
 	HRESULT errorCode;
-	for (unsigned i = 0; i < numDriverTypes; ++i)
-	{
+	for (unsigned i = 0; i < numDriverTypes; ++i) {
 		errorCode = D3D11CreateDeviceAndSwapChain(NULL, driverTypes[i], NULL, createDeviceFlags,
 			featureLevels, numFeatureLevels, D3D11_SDK_VERSION, &swapDesc, &pSwapChain, &pDevice,
 			&featureLevel, &pImmediateContext);
 
-		if (SUCCEEDED(errorCode))
-		{
+		if (SUCCEEDED(errorCode)) {
 			driverType = driverTypes[i];
 			break;
 		}
 	}
 
-	if (FAILED(errorCode))
-	{
+	if (FAILED(errorCode)) {
 		OutputDebugString(_T("FAILED TO CREATE DEVICE AND SWAP CHAIN"));
 		MyDebug(_T("FAILED TO CREATE DEVICE AND SWAP CHAIN"));
 		return false;
@@ -584,8 +609,7 @@ bool init(HWND hWnd)
 	HRESULT result;
 	// CREATE RENDER TARGET VIEW
 	result = pSwapChain->GetBuffer(NULL, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&pBackBufferTex));
-	if (FAILED(result))
-	{
+	if (FAILED(result)) {
 		return false;
 	}
 
@@ -601,8 +625,7 @@ bool init(HWND hWnd)
 	RTVDesc.Texture2D.MipSlice = 0;
 
 	result = pDevice->CreateRenderTargetView(pBackBufferTex, &RTVDesc, &pRenderTargetView);
-	if (FAILED(result))
-	{
+	if (FAILED(result)) {
 		MyDebug(_T("ERROR"));
 	}
 	Memory::SafeRelease(pBackBufferTex);
@@ -615,6 +638,8 @@ bool init(HWND hWnd)
 	descDepth.Height = m_nRenderHeight;// swapDesc.BufferDesc.Height;
 	descDepth.MipLevels = 1;
 	descDepth.ArraySize = 1;
+
+	// TODO_MASK: see what game uses.
 	descDepth.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;// DXGI_FORMAT_D32_FLOAT;//DXGI_FORMAT_D24_UNORM_S8_UINT;;//pDeviceSettings->d3d11.AutoDepthStencilFormat;
 	// DXGI_FORMAT_D32_FLOAT_S8X24_UINT
 	descDepth.SampleDesc.Count = 1;
@@ -654,8 +679,7 @@ bool init(HWND hWnd)
 
 	// Create depth stencil state
 	result = pDevice->CreateDepthStencilState(&dsDesc, &pDSState);
-	if (FAILED(result))
-	{
+	if (FAILED(result)) {
 		return false;
 	}
 
@@ -676,8 +700,7 @@ bool init(HWND hWnd)
 		&descDSV, // Depth stencil desc
 		&pDepthStencilView);  // [out] Depth stencil view
 
-	if (FAILED(result))
-	{
+	if (FAILED(result)) {
 		WCHAR buf[100];
 		wsprintf(buf, L"%x", result);
 		MyDebug(buf);
@@ -685,12 +708,12 @@ bool init(HWND hWnd)
 		return false;
 	}
 
-				   //BIND RENDER TARGET VIEW
+	//BIND RENDER TARGET VIEW
 	pImmediateContext->OMSetRenderTargets(1, &pRenderTargetView, pDepthStencilView); // depth stencil view is for shadow map
-	
+
 
 	D3D11_DEPTH_STENCIL_DESC depthDisabledStencilDesc;
-																					 // Clear the second depth stencil state before setting the parameters.
+	// Clear the second depth stencil state before setting the parameters.
 	ZeroMemory(&depthDisabledStencilDesc, sizeof(depthDisabledStencilDesc));
 
 	// Now create a second depth stencil state which turns off the Z buffer for 2D rendering.  The only difference is 
@@ -712,8 +735,7 @@ bool init(HWND hWnd)
 
 	// Create the state using the device.
 	result = pDevice->CreateDepthStencilState(&depthDisabledStencilDesc, &m_depthDisabledStencilState);
-	if (FAILED(result))
-	{
+	if (FAILED(result)) {
 		return false;
 	}
 
@@ -733,8 +755,7 @@ bool init(HWND hWnd)
 
 	// Create the camera object.
 	m_CameraLeft = new CameraClass;
-	if (!m_CameraLeft)
-	{
+	if (!m_CameraLeft) {
 		return false;
 	}
 
@@ -743,8 +764,7 @@ bool init(HWND hWnd)
 
 	// Create the camera object.
 	m_CameraRight = new CameraClass;
-	if (!m_CameraRight)
-	{
+	if (!m_CameraRight) {
 		return false;
 	}
 
@@ -753,90 +773,92 @@ bool init(HWND hWnd)
 
 	// Create the model object.
 	m_Model = new ModelClass;
-	if (!m_Model)
-	{
+	if (!m_Model) {
 		return false;
 	}
 
 	// Initialize the model object.
 	result = m_Model->Initialize(pDevice, pImmediateContext, L"cube_texture.png");
-	if (!result)
-	{
+	if (!result) {
 		MessageBox(hWnd, L"Could not initialize the model object.", L"Error", MB_OK);
 		return false;
 	}
 
 	// Create the color shader object.
 	m_ColorShader = new ColorShaderClass;
-	if (!m_ColorShader)
-	{
+	if (!m_ColorShader) {
 		return false;
 	}
 
 	// Initialize the color shader object.
 	result = m_ColorShader->Initialize(pDevice, hWnd);
-	if (!result)
-	{
+	if (!result) {
 		MessageBox(hWnd, L"Could not initialize the color shader object.", L"Error", MB_OK);
+		return false;
+	}
+
+	// Create the color shader object.
+	m_hamColorShader = new ColorShaderClass;
+	if (!m_hamColorShader) {
+		return false;
+	}
+
+	// Initialize the color shader object.
+	result = m_hamColorShader->Initialize2(pDevice, hWnd);
+	if (!result) {
+		MessageBox(hWnd, L"Could not initialize the ham color shader object.", L"Error", MB_OK);
 		return false;
 	}
 
 
 	// Create the render to texture object.
 	m_RenderTextureLeft = new RenderTextureClass;
-	if (!m_RenderTextureLeft)
-	{
+	if (!m_RenderTextureLeft) {
 		return false;
 	}
 
 	// Initialize the render to texture object.
 	result = m_RenderTextureLeft->Initialize(pDevice, m_nRenderWidth, m_nRenderHeight);
-	if (!result)
-	{
+	if (!result) {
 		return false;
 	}
 
 	m_RenderTextureRight = new RenderTextureClass;
-	if (!m_RenderTextureRight)
-	{
+	if (!m_RenderTextureRight) {
 		return false;
 	}
 
 	// Initialize the render to texture object.
 	result = m_RenderTextureRight->Initialize(pDevice, m_nRenderWidth, m_nRenderHeight);
-	if (!result)
-	{
+	if (!result) {
 		return false;
 	}
 
 	// Create the debug window object.
 	m_DebugWindowLeft = new DebugWindowClass;
-	if (!m_DebugWindowLeft)
-	{
+	if (!m_DebugWindowLeft) {
 		return false;
 	}
 
 	// Initialize the debug window object.
-	result = m_DebugWindowLeft->Initialize(pDevice, clientWidth, clientHeight, clientWidth/2, clientHeight);
-	if (!result)
-	{
+	result = m_DebugWindowLeft->Initialize(pDevice, clientWidth, clientHeight, clientWidth / 2, clientHeight);
+	if (!result) {
 		MessageBox(hWnd, L"Could not initialize the debug window object.", L"Error", MB_OK);
 		return false;
 	}
 
 	m_DebugWindowRight = new DebugWindowClass;
-	if (!m_DebugWindowRight)
-	{
+	if (!m_DebugWindowRight) {
 		return false;
 	}
 	// Initialize the debug window object.
-	result = m_DebugWindowRight->Initialize(pDevice, clientWidth, clientHeight, clientWidth/2, clientHeight);
+	result = m_DebugWindowRight->Initialize(pDevice, clientWidth, clientHeight, clientWidth / 2, clientHeight);
 
 
 	// Create an orthographic projection matrix for 2D rendering.
 	//D3DXMatrixOrthoLH(&m_orthoMatrix, (float)screenWidth, (float)screenHeight, screenNear, screenDepth);
-	DirectX::XMMATRIX mo = DirectX::XMMatrixOrthographicLH((float)clientWidth, (float)clientHeight, 0, 10);
-	m_orthoMatrix.set((const float*)&mo.r);
+	DirectX::XMMATRIX mo = DirectX::XMMatrixOrthographicLH((float) clientWidth, (float) clientHeight, 0, 10);
+	m_orthoMatrix.set((const float*) &mo.r);
 
 
 
@@ -848,12 +870,88 @@ bool init(HWND hWnd)
 
 	SetupCameras();
 
-	if (!vr::VRCompositor())
-	{
+	if (!vr::VRCompositor()) {
 		printf("Compositor initialization failed. See log file for details\n");
 		return false;
 	}
 
+	// TODO_NEXT:
+// See if this stays between launches:
+	auto ipd = vr::VRSettings()->GetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IPD_Float);
+	auto ipdo = vr::VRSettings()->GetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IpdOffset_Float);
+
+	vr::EVRSettingsError err = vr::EVRSettingsError::VRSettingsError_None;
+	vr::HmdMatrix34_t matEyeRight = m_pHMD->GetEyeToHeadTransform(vr::Eye_Left);
+	vr::VRSettings()->SetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IpdOffset_Float, ipd * 1.5f);
+	//vr::VRSettings()->SetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IpdOffset_Float, -5.0f, &err);
+
+	matEyeRight = m_pHMD->GetEyeToHeadTransform(vr::Eye_Left);
+
+	//vr::VRSettings()->SetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IPD_Float, ipd * 0.0f, &err);
+/*	ipd = vr::VRSettings()->GetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IPD_Float);
+	ipdo = vr::VRSettings()->GetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IpdOffset_Float);
+
+	vr::VRSettings()->SetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IpdOffset_Float, ipd * 1.5f);
+
+	ipd = vr::VRSettings()->GetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IPD_Float);
+	ipdo = vr::VRSettings()->GetFloat(vr::k_pch_SteamVR_Section, vr::k_pch_SteamVR_IpdOffset_Float);*/
+
+	// See if pimax hidden area stuff impacts this.
+ // TODO_NEXT: apply stencil
+	auto hamLeft = vr::VRSystem()->GetHiddenAreaMesh(vr::Eye_Left);
+
+	OutputDebugStringW(L"Left Eye Mesh:\n");
+	for (int tri = 0; tri < hamLeft.unTriangleCount; ++tri)
+	{
+		std::wstringstream str;
+		str << L"{" << (hamLeft.pVertexData + (tri * 3))->v[0] << L"," << (hamLeft.pVertexData + (tri * 3))->v[1] << L"},\n";
+		str << L"{"<< (hamLeft.pVertexData + (tri * 3) + 1)->v[0] << L"," << (hamLeft.pVertexData + (tri * 3) + 1)->v[1] << L"},\n";
+		str << L"{" << (hamLeft.pVertexData + (tri * 3) + 2)->v[0] << L"," << (hamLeft.pVertexData + (tri * 3) + 2)->v[1] << L"},\n";;
+
+		OutputDebugStringW(str.str().c_str());
+	}
+
+	auto hamRight = vr::VRSystem()->GetHiddenAreaMesh(vr::Eye_Right);
+
+	OutputDebugStringW(L"Right Eye Mesh:\n");
+	for (int tri = 0; tri < hamRight.unTriangleCount; ++tri)
+	{
+		std::wstringstream str;
+		str << (hamRight.pVertexData + (tri * 3))->v[0] << L"," << (hamRight.pVertexData + (tri * 3))->v[1] << L"," << (hamRight.pVertexData + (tri * 3) + 1)->v[0] << L"," << (hamRight.pVertexData + (tri * 3) + 1)->v[1] 
+			 << L"," << (hamRight.pVertexData + (tri * 3) + 2)->v[0] << L"," << (hamRight.pVertexData + (tri * 3) + 2)->v[1] << L"\n";
+
+		OutputDebugStringW(str.str().c_str());
+	}
+
+
+	// Create the model object.
+	m_hamLeftModel = new ModelClass;
+	if (!m_hamLeftModel) {
+		return false;
+	}
+
+	// Initialize the model object.
+	result = m_hamLeftModel->InitializeHam(pDevice, pImmediateContext, L"green_texture.png", hamLeft);
+	if (!result) {
+		MessageBox(hWnd, L"Could not initialize the ham left model object.", L"Error", MB_OK);
+		return false;
+	}
+
+		// Create the model object.
+	m_hamRightModel = new ModelClass;
+	if (!m_hamRightModel) {
+		return false;
+	}
+
+	// Initialize the model object.
+	result = m_hamRightModel->InitializeHam(pDevice, pImmediateContext, L"green_texture.png", hamRight);
+	if (!result) {
+		MessageBox(hWnd, L"Could not initialize the ham right model object.", L"Error", MB_OK);
+		return false;
+	}
+
+
+	
 	return true;
 
 }
@@ -872,7 +970,7 @@ void TurnZBufferOff()
 	return;
 }
 
-
+#include "CommonStates.h"
 bool errorshown = false;
 
 bool RenderScene(vr::Hmd_Eye nEye)
@@ -880,9 +978,27 @@ bool RenderScene(vr::Hmd_Eye nEye)
 	bool result;
 	D3DXMATRIX viewMatrix, projectionMatrix, worldMatrix, orthoMatrix;
 
-
 	projectionMatrix = GetCurrentViewProjectionMatrix(nEye);
 	
+	auto hamModel = nEye == vr::Hmd_Eye::Eye_Left ? m_hamLeftModel : m_hamRightModel;
+
+	DirectX::CommonStates states(pDevice);
+	pImmediateContext->RSSetState(states.CullNone());
+	hamModel->Render(pImmediateContext);
+	result = m_hamColorShader->Render(pImmediateContext, hamModel->GetIndexCount(), worldMatrix, viewMatrix, projectionMatrix, hamModel->GetTexture());
+	if (!errorshown && !result)
+	{
+		errorshown = true;
+		return false;
+		MyDebug(_T("HAM render failed"));
+	}
+
+
+	// TODO_HAM: note lack of culling
+	pImmediateContext->RSSetState(states.CullCounterClockwise());
+	
+	projectionMatrix = GetCurrentViewProjectionMatrix(nEye);
+
 	// Put the model vertex and index buffers on the graphics pipeline to prepare them for drawing.
 	m_Model->Render(pImmediateContext);
 
@@ -898,6 +1014,7 @@ bool RenderScene(vr::Hmd_Eye nEye)
 	return true;
 }
 
+
 bool RenderToTexture()
 {
 	bool result;
@@ -908,7 +1025,7 @@ bool RenderToTexture()
 	//Clear the render to texture background to blue so we can differentiate it from the rest of the normal scene.
 
 		// Clear the render to texture.
-		m_RenderTextureLeft->ClearRenderTarget(pImmediateContext, pDepthStencilView, 0.0f, 0.0f, 1.0f, 1.0f);
+		m_RenderTextureLeft->ClearRenderTarget(pImmediateContext, pDepthStencilView, 0.1f, 0.1f, 0.1f, 1.0f);
 
 	// Render the scene now and it will draw to the render to texture instead of the back buffer.
 	result = RenderScene(vr::Hmd_Eye::Eye_Left);
@@ -923,7 +1040,7 @@ bool RenderToTexture()
 	//Clear the render to texture background to blue so we can differentiate it from the rest of the normal scene.
 
 		// Clear the render to texture.
-		m_RenderTextureRight->ClearRenderTarget(pImmediateContext, pDepthStencilView, 0.0f, 0.0f, 1.0f, 1.0f);
+		m_RenderTextureRight->ClearRenderTarget(pImmediateContext, pDepthStencilView, 0.1f, 0.1f, 0.1f, 1.0f);
 
 	// Render the scene now and it will draw to the render to texture instead of the back buffer.
 	result = RenderScene(vr::Hmd_Eye::Eye_Right);

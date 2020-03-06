@@ -13,6 +13,7 @@
 #include "Vectors.h"
 #include "Matrices.h"
 #include <vector>
+#include "../openvr/headers/openvr.h"
 
 typedef Vector3 D3DXVECTOR3;
 //typedef DirectX::XMFLOAT4 D3DXVECTOR4;
@@ -38,12 +39,19 @@ private:
 		VertexType() {}
 	};
 
+	struct VertexType2
+	{
+		D3DXVECTOR3 position;
+		VertexType2() {}
+	};
+
 public:
 	ModelClass();
 	ModelClass(const ModelClass&);
 	~ModelClass();
 
 	bool Initialize(ID3D11Device*, ID3D11DeviceContext*, WCHAR*);
+	bool InitializeHam(ID3D11Device*, ID3D11DeviceContext*, WCHAR*, vr::HiddenAreaMesh_t);
 	void Shutdown();
 	void Render(ID3D11DeviceContext*);
 
@@ -67,6 +75,7 @@ private:
 	int m_vertexCount, m_indexCount;
 
 	TextureClass* m_Texture;
+	bool isHam = false;
 };
 
 #endif

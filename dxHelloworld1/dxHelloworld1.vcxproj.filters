@@ -107,6 +107,11 @@
     <None Include="texture.ps">
       <Filter>Resources Files</Filter>
     </None>
-    <None Include="..\openvr\bin\win32\openvr_api.dll" />
+    <None Include="hamTexture.ps">
+      <Filter>Resources Files</Filter>
+    </None>
+    <None Include="hamTexture.vs">
+      <Filter>Resources Files</Filter>
+    </None>
   </ItemGroup>
 </Project>
